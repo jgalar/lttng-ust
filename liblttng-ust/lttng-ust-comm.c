@@ -20,6 +20,7 @@
  */
 
 #define _LGPL_SOURCE
+#define _GNU_SOURCE
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/mman.h>
@@ -52,6 +53,7 @@
 #include "compat.h"
 #include "../libringbuffer/tlsfixup.h"
 #include "lttng-ust-baddr.h"
+#include <lttng/ust-dlfcn.h>
 
 /*
  * Has lttng ust comm constructor been called ?
@@ -1405,10 +1407,8 @@ void lttng_ust_malloc_wrapper_init(void)
  */
 void __attribute__((constructor)) lttng_ust_init(void)
 {
-	struct timespec constructor_timeout;
 	sigset_t sig_all_blocked, orig_parent_mask;
 	pthread_attr_t thread_attr;
-	int timeout_mode;
 	int ret;
 
 	if (uatomic_xchg(&initialized, 1) == 1)
@@ -1445,8 +1445,6 @@ void __attribute__((constructor)) lttng_ust_init(void)
 	 * Invoke ust malloc wrapper init before starting other threads.
 	 */
 	lttng_ust_malloc_wrapper_init();
-
-	timeout_mode = get_constructor_timeout(&constructor_timeout);
 
 	ret = sem_init(&constructor_wait, 0, 0);
 	assert(!ret);
@@ -1506,28 +1504,6 @@ void __attribute__((constructor)) lttng_ust_init(void)
 	ret = pthread_sigmask(SIG_SETMASK, &orig_parent_mask, NULL);
 	if (ret) {
 		ERR("pthread_sigmask: %s", strerror(ret));
-	}
-
-	switch (timeout_mode) {
-	case 1:	/* timeout wait */
-		do {
-			ret = sem_timedwait(&constructor_wait,
-					&constructor_timeout);
-		} while (ret < 0 && errno == EINTR);
-		if (ret < 0 && errno == ETIMEDOUT) {
-			ERR("Timed out waiting for lttng-sessiond");
-		} else {
-			assert(!ret);
-		}
-		break;
-	case -1:/* wait forever */
-		do {
-			ret = sem_wait(&constructor_wait);
-		} while (ret < 0 && errno == EINTR);
-		assert(!ret);
-		break;
-	case 0:	/* no timeout */
-		break;
 	}
 }
 
@@ -1702,4 +1678,51 @@ void lttng_ust_sockinfo_session_enabled(void *owner)
 {
 	struct sock_info *sock_info = owner;
 	sock_info->statedump_pending = 1;
+}
+
+int __libc_start_main(int (*main) (int, char * *, char * *), int argc,
+	char * * ubp_av, void (*init) (void), void (*fini) (void),
+	void (*rtld_fini) (void), void (* stack_end))
+{
+	int ret;
+	int timeout_mode;
+	struct timespec constructor_timeout;
+	int (*libc_main_func)(int (*main) (int, char * *, char * *),
+		int argc, char * * ubp_av, void (*init) (void),
+		void (*fini) (void), void (*rtld_fini) (void),
+		void (* stack_end));
+
+	/* Retrieve the original __libc_start_main function */
+	libc_main_func = dlsym(RTLD_NEXT, "__libc_start_main");
+	if (libc_main_func == NULL) {
+		ERR("unable to find \"__libc_start_main\" symbol\n");
+		errno = ENOSYS;
+		return -1;
+	}
+
+	timeout_mode = get_constructor_timeout(&constructor_timeout);
+	switch (timeout_mode) {
+	case 1:	/* timeout wait */
+		do {
+			ret = sem_timedwait(&constructor_wait,
+					&constructor_timeout);
+		} while (ret < 0 && errno == EINTR);
+		if (ret < 0 && errno == ETIMEDOUT) {
+			ERR("Timed out waiting for lttng-sessiond");
+		} else {
+			assert(!ret);
+		}
+		break;
+	case -1:/* wait forever */
+		do {
+			ret = sem_wait(&constructor_wait);
+		} while (ret < 0 && errno == EINTR);
+		assert(!ret);
+		break;
+	case 0:	/* no timeout */
+		break;
+	}
+
+	/* Call the original function */
+	return libc_main_func(main, argc, ubp_av, init, fini, rtld_fini, stack_end);
 }

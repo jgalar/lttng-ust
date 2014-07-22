@@ -83,4 +83,11 @@ liblttng_ust_la_LIBADD = \
 	liblttng-ust-tracepoint.la \
 	liblttng-ust-runtime.la liblttng-ust-support.la
 
+if LTTNG_UST_BUILD_WITH_LIBDL
+liblttng_ust_la_LIBADD += -ldl
+endif
+if LTTNG_UST_BUILD_WITH_LIBC_DL
+liblttng_ust_la_LIBADD += -lc
+endif
+
 liblttng_ust_la_CFLAGS = -DUST_COMPONENT="liblttng_ust" -fno-strict-aliasing
