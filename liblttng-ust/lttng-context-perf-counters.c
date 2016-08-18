@@ -29,6 +29,7 @@
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <linux/perf_event.h>
+#include <linux/version.h>
 #include <lttng/ust-events.h>
 #include <lttng/ust-tracer.h>
 #include <lttng/ringbuffer-config.h>
@@ -96,7 +97,7 @@ uint64_t read_perf_counter_syscall(
 	return count;
 }
 
-#if defined(__x86_64__) || defined(__i386__)
+#if (defined(__x86_64__) || defined(__i386__)) && LINUX_VERSION_CODE >= KERNEL_VERSION(3,12,0)
 
 static
 uint64_t rdpmc(unsigned int counter)
